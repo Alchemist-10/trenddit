@@ -42,6 +42,60 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ---- UI ----
+# Global CSS + top navbar with smooth scrolling (CSS-only)
+st.markdown(
+    """
+        <style>
+            :root{
+                --td-nav-height: 56px;
+                --td-nav-bg: linear-gradient(90deg, #ffffff 0%, #f7fbff 50%, #ffffff 100%);
+                --td-link: #1f77b4;
+                --td-link-hover: #125a89;
+            }
+            html { scroll-behavior: smooth; }
+            /* Offset anchors so sticky navbar doesn't cover headings */
+            [id] { scroll-margin-top: calc(var(--td-nav-height) + 8px); }
+
+            .td-navbar{
+                position: sticky; top: 0; z-index: 9999;
+                height: var(--td-nav-height);
+                display: flex; align-items: center;
+                padding: 0 12px;
+                background: var(--td-nav-bg);
+                backdrop-filter: blur(6px);
+                border-bottom: 1px solid #eaecef;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                border-radius: 0 0 10px 10px;
+            }
+            .td-nav-inner{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+            .td-brand{ font-weight: 700; margin-right: 6px; color: #0f172a; opacity: .9; }
+            .td-sep{ opacity: .25; margin: 0 6px; }
+            .td-navbar a{
+                display: inline-flex; align-items: center; gap: 6px;
+                padding: 6px 10px; border-radius: 8px;
+                color: var(--td-link); text-decoration: none; font-weight: 600; font-size: 0.92rem;
+                transition: all .15s ease-in-out;
+            }
+            .td-navbar a:hover{ color: var(--td-link-hover); background: rgba(31,119,180,0.08); }
+            .td-navbar a:active{ transform: translateY(1px); }
+            .td-emoji{ font-size: 1.05rem; }
+            @media (max-width: 520px){ .td-brand, .td-sep { display:none; } }
+        </style>
+        <nav class=\"td-navbar\">
+            <div class=\"td-nav-inner\">
+                <span class=\"td-brand\">Navigate</span>
+                <span class=\"td-sep\">·</span>
+                <a href=\"#sentiment-timeline\"><span class=\"td-emoji\">📈</span><span>Sentiment</span></a>
+                <a href=\"#top-ngrams\"><span class=\"td-emoji\">🧩</span><span>Top keywords</span></a>
+                <a href=\"#topic-clusters\"><span class=\"td-emoji\">🗂️</span><span>Clusters</span></a>
+                <a href=\"#live-posts\"><span class=\"td-emoji\">⚡</span><span>Live posts</span></a>
+                <a href=\"#alerts\"><span class=\"td-emoji\">🚨</span><span>Alerts</span></a>
+            </div>
+        </nav>
+        """,
+    unsafe_allow_html=True,
+)
+
 st.title("Trenddit — Real-time Reddit + X trend analyzer (Prototype)")
 
 col1, col2 = st.columns([3, 1])
@@ -68,7 +122,10 @@ if st.button("Save query"):
         st.error(f"Failed to save query: {e}")
 
 # timeframe -> start_time
-now = datetime.utcnow()
+# Use timezone-aware UTC to avoid off-by-timezone filters in PostgREST
+from datetime import timezone as _tz
+
+now = datetime.now(_tz.utc)
 tf_map = {"1h": 1, "6h": 6, "24h": 24, "7d": 24 * 7, "30d": 24 * 30}
 hours = tf_map.get(timeframe, 24)
 start_time = now - timedelta(hours=hours)
@@ -78,13 +135,27 @@ start_time = now - timedelta(hours=hours)
 def fetch_posts(keyword, sources, start_time, limit=1000, offset=0):
     # Simple RPC via PostgREST style
     query = supabase.table("posts").select("*").order("created_at", desc=True)
+    # Ensure ISO string includes timezone (Z) for timestamptz column
     query = query.filter("created_at", "gte", start_time.isoformat())
+
     if keyword:
-        # crude match: keyword in title or body or posts.keyword equals
-        query = query.filter("keyword", "eq", keyword)
+        kw = keyword.strip()
+        # Broaden search: title/body contains keyword OR keyword column matches (case-insensitive)
+        # PostgREST OR syntax: or=(col.op.val,...) — supabase-py v2 exposes .or_
+        try:
+            query = query.or_(
+                f"title.ilike.%{kw}%,body.ilike.%{kw}%,keyword.ilike.%{kw}%"
+            )
+        except Exception:
+            # Fallback to equality on keyword if .or_ not available
+            query = query.filter("keyword", "eq", kw)
+
     if sources:
-        # **FIXED**: Supabase 'in' filter expects a list or tuple
-        query = query.filter("source", "in", tuple(sources))
+        # Use native in_ helper for reliability
+        try:
+            query = query.in_("source", list(sources))
+        except Exception:
+            query = query.filter("source", "in", list(sources))
 
     try:
         # Pagination for stream
@@ -115,6 +186,7 @@ df = posts_to_df(posts)
 left, right = st.columns([2, 1])
 
 with left:
+    st.markdown('<a id="sentiment-timeline"></a>', unsafe_allow_html=True)
     # Sentiment timeline: compute hourly average and volume
     st.subheader("Sentiment timeline")
     if df.empty:
@@ -155,6 +227,7 @@ with left:
         st.plotly_chart(fig, use_container_width=True)
 
     # Top n-grams
+    st.markdown('<a id="top-ngrams"></a>', unsafe_allow_html=True)
     st.subheader("Top keywords / n-grams")
     if not df.empty:
         # combine title+body safely
@@ -181,6 +254,7 @@ with left:
         st.write("No text to analyze.")
 
     # Topic clusters (basic)
+    st.markdown('<a id="topic-clusters"></a>', unsafe_allow_html=True)
     st.subheader("Topic clusters (approximate)")
     # we will show top cluster labels and representative post
     if not df.empty and "embedding" in df.columns:
@@ -246,6 +320,7 @@ with left:
         st.write("No embeddings available for clustering.")
 
 with right:
+    st.markdown('<a id="live-posts"></a>', unsafe_allow_html=True)
     st.subheader("Live posts")
     page_size = int(st.number_input("Page size", min_value=5, max_value=100, value=10))
     # pagination controls
@@ -268,6 +343,7 @@ with right:
             st.write(p.get("body") or "")
 
     # Alerts panel
+    st.markdown('<a id="alerts"></a>', unsafe_allow_html=True)
     st.subheader("Alerts")
     # **FIXED**: Use try/except for supabase-py v2 error handling
     try:
