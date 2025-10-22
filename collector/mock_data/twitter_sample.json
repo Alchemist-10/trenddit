@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "1234567890",
+      "text": "OpenAI releases new update — this is amazing!",
+      "created_at": "2025-10-20T12:00:00Z",
+      "author_id": "user123",
+      "public_metrics": {"retweet_count": 5, "reply_count": 1, "like_count": 20}
+    },
+    {
+      "id": "1234567891",
+      "text": "Concerned about AI safety in the latest release.",
+      "created_at": "2025-10-20T13:00:00Z",
+      "author_id": "user456",
+      "public_metrics": {"retweet_count": 2, "reply_count": 3, "like_count": 10}
+    }
+  ]
+}
