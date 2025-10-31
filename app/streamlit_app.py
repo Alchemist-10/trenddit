@@ -1,17 +1,8 @@
 # app/streamlit_app.py
-"""
-Streamlit app for Trenddit prototype.
-
-Run:
-  streamlit run app/streamlit_app.py
-
-Environment variables expected (store securely, not in frontend/public repos):
-- SUPABASE_URL
-- SUPABASE_KEY   (service_role key if you need insert access; for user-only actions use anon + Edge functions)
-"""
 
 
 import os
+import sys
 import time
 from dotenv import load_dotenv
 
@@ -29,6 +20,17 @@ from io import StringIO
 
 # local utils
 from utils import pretty_time_ago
+
+# Allow importing project modules (collector) when running via Streamlit
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    # Directly call the collector from the UI when keyword is submitted
+    from collector.reddit_collector import fetch_and_store as collect_reddit
+except Exception as _e:
+    collect_reddit = None  # Fallback if not available; we'll guard usage
 
 # ---- configure ----
 st.set_page_config(page_title="Trenddit — Prototype", layout="wide")
@@ -100,7 +102,19 @@ st.title("Trenddit — Real-time Reddit + X trend analyzer (Prototype)")
 
 col1, col2 = st.columns([3, 1])
 with col1:
-    keyword = st.text_input("Search keyword", value="openai")
+    # Submit on Enter: set a flag via on_change, then process below
+    def _on_keyword_submit():
+        kw = st.session_state.get("keyword", "").strip()
+        if kw:
+            st.session_state["should_collect"] = True
+
+    keyword = st.text_input(
+        "Search keyword",
+        value="openai",
+        key="keyword",
+        on_change=_on_keyword_submit,
+        placeholder="e.g., openai, donald trump, cricket, ronaldo",
+    )
 with col2:
     source = st.multiselect(
         "Source", options=["reddit", "twitter"], default=["reddit", "twitter"]
@@ -110,6 +124,26 @@ refresh_mode = st.radio("Live update mode", ["polling", "realtime (optional)"], 
 poll_interval = st.slider(
     "Polling interval (seconds)", min_value=10, max_value=300, value=30
 )
+
+# If user hit Enter in the keyword box, run collector once before fetching
+if st.session_state.get("should_collect"):
+    if collect_reddit is not None:
+        try:
+            with st.spinner(
+                f"Collecting posts for '{st.session_state.get('keyword','')}'..."
+            ):
+                collect_reddit(st.session_state.get("keyword", "").strip(), limit=100)
+            st.toast("Collection complete.")
+        except Exception as e:
+            st.warning(f"Collector error: {e}")
+    else:
+        st.info(
+            "Collector module not available in this session; skipping auto-collect."
+        )
+    # Reset flag and proceed to fetch
+    st.session_state["should_collect"] = False
+    # Give DB a brief moment to commit
+    time.sleep(0.5)
 
 # Save query
 if st.button("Save query"):
