@@ -4,6 +4,7 @@
 import os
 import sys
 import time
+import re
 from dotenv import load_dotenv
 
 # Load .env file at the very beginning
@@ -63,6 +64,7 @@ def sign_in(email: str, password: str):
         response = supabase.auth.sign_in_with_password(
             {"email": email, "password": password}
         )
+        # Return the full response object
         return response
     except Exception as e:
         return {"error": str(e)}
@@ -79,17 +81,58 @@ def sign_out():
 
 
 def check_authentication():
-    """Check if user is authenticated"""
-    if "authenticated" not in st.session_state:
+    """Check if user is authenticated using Supabase session"""
+    try:
+        # Get current session from Supabase
+        session = supabase.auth.get_session()
+
+        # Check if session exists and has a user
+        if session and hasattr(session, "user") and session.user:
+            # User is authenticated via Supabase
+            st.session_state.authenticated = True
+            st.session_state.user = session.user
+            return True
+        # Alternative: check if session_state already has user from recent login
+        elif st.session_state.get("authenticated") and st.session_state.get("user"):
+            return True
+        else:
+            # No valid session
+            st.session_state.authenticated = False
+            st.session_state.user = None
+            return False
+    except Exception as e:
+        # If session check fails, check session_state as fallback
+        if st.session_state.get("authenticated") and st.session_state.get("user"):
+            return True
+        # Otherwise assume not authenticated
         st.session_state.authenticated = False
         st.session_state.user = None
-    return st.session_state.authenticated
+        return False
 
 
-# Initialize session state
+# Initialize session state on first load
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
+
+# Check authentication status on every page load
+check_authentication()
+
+
+# ===========================
+# TEXT SANITIZATION HELPERS
+# ===========================
+def strip_html_tags(text: str) -> str:
+    """Remove HTML tags and collapse extra whitespace from a string.
+    Keeps plain text only so user content never injects markup into our templates.
+    """
+    if not text:
+        return ""
+    # Remove tags
+    no_tags = re.sub(r"<[^>]+>", " ", str(text))
+    # Collapse whitespace
+    return re.sub(r"\s+", " ", no_tags).strip()
+
 
 # ---- UI ----
 # Modern CSS with design tokens, navbar, KPI cards, chips, skeleton loaders
@@ -117,98 +160,211 @@ st.markdown(
             }
         }
         
-        /* * MODIFICATION #2: 
-         * Target the main Streamlit scrolling container for smooth scrolling.
-         * This is the key for Requirement 2 (Smooth Scroll).
-         */
-        section[data-testid="stAppViewContainer"] {
+        /* Smooth scrolling for all scrollable elements */
+        html, body, * {
             scroll-behavior: smooth !important;
         }
         
-        /* Offset for anchor links to account for sticky navbar */
-        /* This rule was already correct and is essential! */
-        [id], a[id] {
-            scroll-margin-top: calc(var(--td-nav-height) + 20px);
+        /* Target Streamlit's main container */
+        section[data-testid="stAppViewContainer"],
+        section[data-testid="stAppViewContainer"] > div,
+        .main {
+            scroll-behavior: smooth !important;
+        }
+        
+        /* Offset for anchor links to account for fixed navbar */
+        [id], a[id], [id]::before {
+            scroll-margin-top: calc(var(--td-nav-height) + 30px);
+            scroll-snap-margin-top: calc(var(--td-nav-height) + 30px);
+        
         }
         
         body { 
             -webkit-font-smoothing: antialiased; 
-            -moz-osx-font-smoothing: grayscale; 
+            -moz-osx-font-smoothing: grayscale;
         }
         
-        /* * MODIFICATION #1: 
-         * Changed position: sticky to position: fixed.
-         * Added left: 0 and width: 100% to span the viewport.
-         * This makes the navbar robustly stay at the top (Requirement 1).
-         */
+        /* Modern fixed navbar with enhanced animations */
         .td-navbar{
-            position: fixed; /* CHANGED from sticky */
-            top: 0; 
-            left: 0; /* ADDED */
-            width: 100%; /* ADDED */
-            z-index: 9999;
+            position: fixed !important;
+            top: 0 !important; 
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            max-width: 100vw !important;
+            z-index: 9999 !important;
             min-height: var(--td-nav-height);
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 0 20px;
+            display: flex !important; 
+            align-items: center; 
+            justify-content: space-between;
+            padding: 0 24px;
             background: linear-gradient(135deg, var(--td-accent) 0%, var(--td-accent-2) 100%);
-            backdrop-filter: blur(12px) saturate(180%);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-            border-radius: 0 0 20px 20px;
-            box-sizing: border-box; /* ADDED to ensure padding doesn't break width */
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);
+            border-radius: 0 0 24px 24px;
+            box-sizing: border-box;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin: 0 !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+        /* Hardening: ensure navbar shows across desktop breakpoints with higher specificity */
+        @media (min-width: 769px){
+            body .td-navbar, .stApp .td-navbar, .stAppViewContainer .td-navbar{
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+        }
+        @media (min-width: 1024px){
+            body .td-navbar, .stApp .td-navbar, .stAppViewContainer .td-navbar{
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+        }
+        /* Ensure navbar is visible on desktop/large screens as well */
+        @media (min-width: 769px){
+            .td-navbar{
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
         }
         
-        /* * MODIFICATION #3: 
-         * ADDED this rule to push the main Streamlit content down.
-         * This prevents your page content from being hidden under the fixed navbar.
-         */
+        /* Navbar hover effect */
+        .td-navbar:hover {
+            box-shadow: 0 6px 28px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* Push content below fixed navbar */
         .block-container {
-            padding-top: calc(var(--td-nav-height) + 20px) !important;
+            padding-top: calc(var(--td-nav-height) + 24px) !important;
         }
 
+        /* Brand area with logo animation */
         .td-brand-area{
-            display: flex; align-items: center; gap: 10px;
+            display: flex !important; 
+            align-items: center; 
+            gap: 12px;
+            transition: transform 0.3s ease;
+            visibility: visible !important;
         }
-        .td-logo{ font-size: 1.5rem; }
+        .td-brand-area:hover {
+            transform: scale(1.05);
+        }
+        .td-logo{ 
+            font-size: 1.6rem;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+            display: inline-block !important;
+        }
         .td-brand{
-            font-weight: 700; font-size: 1.1rem;
-            color: white; letter-spacing: -0.02em;
+            font-weight: 700; 
+            font-size: 1.15rem;
+            color: white; 
+            letter-spacing: -0.02em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: inline-block !important;
         }
+        
+        /* Navigation links container */
         .td-nav-links{
-            display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            display: flex !important; 
+            gap: 8px; 
+            align-items: center; 
+            flex-wrap: wrap;
+            visibility: visible !important;
         }
+        
+        /* Modern pill-style navigation links with smooth animations */
         .td-nav-link{
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 10px 18px; 
+            display: inline-flex !important; 
+            align-items: center; 
+            gap: 8px;
+            padding: 11px 20px; 
             border-radius: 50px;
             color: rgba(255,255,255,0.95); 
             text-decoration: none;
             font-weight: 600; 
-            font-size: 0.93rem;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.15);
-            backdrop-filter: blur(8px);
-            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            font-size: 0.94rem;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.18);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
             position: relative;
             cursor: pointer;
+            overflow: hidden;
+            visibility: visible !important;
         }
+        
+        /* Shimmer effect on hover */
+        .td-nav-link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s ease;
+        }
+        
+        .td-nav-link:hover::before {
+            left: 100%;
+        }
+        
+        /* Hover state with enhanced lift effect */
         .td-nav-link:hover{
             color: white;
-            background: rgba(255,255,255,0.25);
-            border-color: rgba(255,255,255,0.35);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            background: rgba(255,255,255,0.28);
+            border-color: rgba(255,255,255,0.4);
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2), 0 2px 8px rgba(0,0,0,0.15);
         }
+        
+        /* Active/click state */
         .td-nav-link:active{
-            transform: translateY(0);
-            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            transform: translateY(-1px) scale(0.98);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+            transition: all 0.1s ease;
         }
-        .td-emoji{ font-size: 1.05rem; }
+        
+        /* Focus state for accessibility */
+        .td-nav-link:focus {
+            outline: 2px solid rgba(255,255,255,0.6);
+            outline-offset: 2px;
+        }
+        
+        .td-emoji{ 
+            font-size: 1.1rem;
+            transition: transform 0.3s ease;
+        }
+        
+        .td-nav-link:hover .td-emoji {
+            transform: scale(1.15) rotate(5deg);
+        }
+        
+        /* Responsive design - Mobile overrides */
+        @media (max-width: 768px){
+            .td-navbar { 
+                padding: 0 16px; 
+                border-radius: 0 0 18px 18px; 
+            }
+            .td-nav-links{ gap: 6px; }
+            .td-nav-link{ padding: 9px 14px; font-size: 0.9rem; }
+            .td-logo { font-size: 1.5rem; }
+        }
+        
+        /* Extra small screens */
         @media (max-width: 540px){
-            .td-brand{ display: none; }
-            .td-nav-links{ gap: 4px; }
-            .td-nav-link{ padding: 6px 10px; font-size: 0.85rem; }
-            .td-navbar { padding: 0 10px; }
+            .td-brand{ display: none !important; }
+            .td-nav-links{ gap: 5px; }
+            .td-nav-link{ padding: 8px 12px; font-size: 0.88rem; }
+            .td-navbar { padding: 0 12px; border-radius: 0 0 16px 16px; }
+            .td-logo { font-size: 1.4rem; }
         }
 
         /* --- ALL OTHER STYLES (KPI, Chips, etc.) --- */
@@ -447,7 +603,7 @@ if not check_authentication():
                 Trenddit
             </h1>
             <p style="color: #64748b; font-size: 1.1rem; margin-top: 0.5rem;">
-                Real-time Reddit analytics powered by AI
+                Real-time social media analytics powered by AI
             </p>
         </div>
         """,
@@ -502,11 +658,15 @@ if not check_authentication():
                             result = sign_in(email, password)
                             if "error" in result:
                                 st.error(f"❌ {result['error']}")
-                            else:
+                            elif hasattr(result, "user") and result.user:
+                                # Successfully signed in
                                 st.session_state.authenticated = True
                                 st.session_state.user = result.user
                                 st.success("✅ Signed in successfully!")
+                                time.sleep(0.5)  # Brief pause to show success message
                                 st.rerun()
+                            else:
+                                st.error("❌ Sign in failed. Please try again.")
                     else:
                         st.warning("Please enter both email and password")
 
@@ -572,8 +732,8 @@ with st.sidebar:
             st.rerun()
 
 st.markdown('<a id="overview"></a>', unsafe_allow_html=True)
-st.title("Reddit Trend Analytics")
-st.caption("Real-time insights from across Reddit communities")
+st.title("Trenddit")
+st.caption("Real-time insights from across social media communities")
 
 col1, col2 = st.columns([3, 1])
 with col1:
@@ -823,8 +983,8 @@ with left:
             res = df["sentiment_score"].resample("15min").mean().ffill()
             vol = df["sentiment_score"].resample("15min").count()
         else:
-            res = df["sentiment_score"].resample("1H").mean().ffill()
-            vol = df["sentiment_score"].resample("1H").count()
+            res = df["sentiment_score"].resample("1h").mean().ffill()
+            vol = df["sentiment_score"].resample("1h").count()
         timeline = pd.DataFrame({"avg_sentiment": res, "volume": vol}).reset_index()
         fig = px.line(
             timeline,
@@ -928,17 +1088,30 @@ with left:
                     subset = df_reset[df_reset["cluster"] == c]
                     if not subset.empty:
                         rep = subset.iloc[0]  # Get first post in cluster
+                        # Clean and truncate representative text to avoid raw HTML
+                        rep_text_raw = rep.get("title") or rep.get("body", "")
+                        rep_text_clean = strip_html_tags(rep_text_raw)
+                        rep_text_trunc = (
+                            rep_text_clean[:200]
+                            if len(rep_text_clean) > 200
+                            else rep_text_clean
+                        )
                         cluster_summary.append(
                             (
                                 c,
                                 len(subset),
-                                rep.get("title") or rep.get("body", "")[:200],
+                                rep_text_trunc,
                                 rep.get("url"),
                             )
                         )
 
                 # Render as styled cards
                 for c, count, rep_text, url in cluster_summary:
+                    import html
+
+                    # Escape HTML in representative text to prevent rendering HTML tags
+                    rep_text_escaped = html.escape(rep_text)
+
                     subreddit_label = "—"
                     try:
                         meta = (
@@ -949,17 +1122,17 @@ with left:
 
                             meta = json.loads(meta)
                         if isinstance(meta, dict) and "subreddit" in meta:
-                            subreddit_label = f"r/{meta['subreddit']}"
+                            subreddit_label = html.escape(f"r/{meta['subreddit']}")
                     except:
                         pass
 
                     card_html = f"""
                     <div class="td-cluster-card">
                         <div class="td-cluster-label">Cluster {c}: {subreddit_label}</div>
-                        <div style="color: var(--td-text); margin-bottom: 10px;">{rep_text}</div>
+                        <div style="color: var(--td-text); margin-bottom: 10px;">{rep_text_escaped}</div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="color: var(--td-muted); font-size: 0.85rem;">{count} posts</span>
-                            <a href="{url or '#'}" target="_blank" class="td-link-btn">View example ↗</a>
+                            <a href="{html.escape(url or '#', quote=True)}" target="_blank" class="td-link-btn">View Article ↗</a>
                         </div>
                     </div>
                     """
@@ -992,13 +1165,30 @@ with right:
         )
     else:
         for p in posts_page:
+            import html
+
             created = pretty_time_ago(p.get("created_at"))
             score = p.get("sentiment_score") or 0
             label = p.get("sentiment_label") or "neutral"
-            title = p.get("title") or p.get("body", "")[:80]
-            body = p.get("body") or ""
+
+            # Clean, truncate, and escape title/body to prevent raw HTML rendering
+            title_raw = p.get("title") or p.get("body", "")
+            title_clean = strip_html_tags(title_raw)
+            title_trunc = title_clean[:80] if len(title_clean) > 80 else title_clean
+            title = html.escape(title_trunc)
+
+            body_raw = p.get("body") or ""
+            body_clean = strip_html_tags(body_raw)
+            # Truncate BEFORE escaping to avoid breaking HTML entities
+            body_truncated = body_clean[:150] if len(body_clean) > 150 else body_clean
+            body = html.escape(body_truncated)
+            body_suffix = "..." if len(body_raw) > 150 else ""
+
             url = p.get("url") or "#"
             source_name = p.get("source", "reddit")
+
+            # Escape author name as well
+            author = html.escape(p.get("author") or "Anonymous")
 
             # Get subreddit from metadata
             subreddit = "—"
@@ -1009,7 +1199,7 @@ with right:
 
                     meta = json.loads(meta)
                 if isinstance(meta, dict) and "subreddit" in meta:
-                    subreddit = f"r/{meta['subreddit']}"
+                    subreddit = html.escape(f"r/{meta['subreddit']}")
             except:
                 pass
 
@@ -1031,13 +1221,13 @@ with right:
                 </div>
                 <div class="td-post-title">{title}</div>
                 <div class="td-post-meta">
-                    {source_name} • {p.get("author") or "Anonymous"} • {created} • ⬆ {p.get("score", 0)}
+                    {source_name} • {author} • {created} • ⬆ {p.get("score", 0)}
                 </div>
                 <div style="margin-top: 10px; color: var(--td-muted); font-size: 0.9rem;">
-                    {body[:150]}{"..." if len(body) > 150 else ""}
+                    {body}{body_suffix}
                 </div>
                 <div style="margin-top: 12px; text-align: right;">
-                    <a href="{url}" target="_blank" class="td-link-btn">View on Reddit ↗</a>
+                    <a href="{html.escape(url, quote=True)}" target="_blank" class="td-link-btn">View on Reddit ↗</a>
                 </div>
             </div>
             """
